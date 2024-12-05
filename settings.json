@@ -1,0 +1,5 @@
+{
+    "wow_addon_directory": "C:\\Program Files (x86)\\World of Warcraft\\_retail_\\Interface\\AddOns",
+    "elvui_folders": ["ElvUI", "ElvUI_Libraries", "ElvUI_Options"],
+    "api": "https://api.tukui.org/v1/addons"
+}
