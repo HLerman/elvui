@@ -1,6 +1,6 @@
 module github.com/HLerman/elvui
 
-go 1.23.3
+go 1.23.5
 
 require (
 	github.com/hashicorp/go-version v1.7.0
