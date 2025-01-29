@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -97,76 +98,66 @@ func (w *WorldOfWarcraft) PopulateWowAddons() error {
 }
 
 func (a Addon) GetVersion(cf Config) (string, error) {
-	f, err := os.Open(filepath.Join(cf.WowAddonsDirectory, a.Folder, a.Folder+"_Mainline.toc"))
+	tocFile := filepath.Join(cf.WowAddonsDirectory, a.Folder, a.Folder+"_Mainline.toc")
+	f, err := os.Open(tocFile)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("cannot open TOC file %s: %w", tocFile, err)
 	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 
+	const versionPrefix = "## Version:"
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "##") {
-			line = strings.TrimPrefix(line, "##")
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
-				value := strings.TrimSpace(parts[1])
-
-				if key == "Version" {
-					if value[0:1] == "v" {
-						return value[1:], nil
-					}
-					return value, nil
-				}
+		if strings.HasPrefix(line, versionPrefix) {
+			version := strings.TrimSpace(strings.TrimPrefix(line, versionPrefix))
+			version = strings.TrimPrefix(version, "v")
+			if version == "" {
+				return "", errors.New("version found but empty")
 			}
+			return version, nil
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return "", err
+		return "", fmt.Errorf("error reading file: %w", err)
 	}
 
-	return "", errors.New("no version")
+	return "", errors.New("version not found in TOC file")
 }
 
 func (api *API) GetElvuiInformation() error {
 	res, err := http.Get(api.API)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to make HTTP request: %w", err)
 	}
+	defer res.Body.Close()
 
-	if res.StatusCode > 299 {
-		return err
+	if res.StatusCode >= 300 {
+		return fmt.Errorf("invalid HTTP status: %d", res.StatusCode)
 	}
 
 	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	var elvuis []Elvui
-	err = json.Unmarshal(resBody, &elvuis)
-	if err != nil {
-		return err
+	if err := json.Unmarshal(resBody, &elvuis); err != nil {
+		return fmt.Errorf("failed to decode JSON: %w", err)
 	}
 
 	if len(elvuis) == 0 {
-		return errors.New("no data from API")
+		return errors.New("no data received from API")
 	}
 
-	var id *int
-	for i, e := range elvuis {
-		if e.Slug == "elvui" {
-			id = &i
+	for _, elvui := range elvuis {
+		if elvui.Slug == "elvui" {
+			api.Elvui = elvui
+			return nil
 		}
 	}
 
-	if id == nil {
-		return errors.New("no elvui from api")
-	}
-
-	api.Elvui = elvuis[*id]
-	return nil
+	return errors.New("ElvUI not found in API data")
 }

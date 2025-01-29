@@ -36,7 +36,7 @@ func main() {
 	}
 
 	if err = cf.CheckConfig(); err != nil {
-		fmt.Fprintf(log, err.Error())
+		fmt.Fprintf(log, "config check error: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -118,63 +118,83 @@ func main() {
 }
 
 func DownloadElvui(cf utils.Config, elvui utils.Elvui) error {
+	zipPath, err := downloadZipFile(elvui.Url)
+	if err != nil {
+		return err
+	}
+
+	err = extractZipFile(zipPath, cf.WowAddonsDirectory)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func downloadZipFile(url string) (string, error) {
 	elvuiFile := filepath.Join(os.Getenv("TEMP"), "elvui.zip")
 	out, err := os.Create(elvuiFile)
 	if err != nil {
-		return errors.Join(errors.New("error when creatin elvui zip file:"), err)
+		return "", errors.Join(errors.New("error when creating elvui zip file:"), err)
 	}
 	defer out.Close()
 
-	resp, err := http.Get(elvui.Url)
+	resp, err := http.Get(url)
 	if err != nil {
-		return errors.Join(errors.New("error when downloading elvui zip file:"), err)
+		return "", errors.Join(errors.New("error when downloading elvui zip file:"), err)
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return errors.New(fmt.Sprintf("error when downloading elvui zip file: http status:%s", resp.Status))
+		return "", fmt.Errorf("error when downloading elvui zip file: http status:%s", resp.Status)
 	}
-
-	defer resp.Body.Close()
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
-		return errors.Join(errors.New("error when copying elvui zip file:"), err)
+		return "", errors.Join(errors.New("error when copying elvui zip file:"), err)
 	}
 
-	zip, err := zip.OpenReader(elvuiFile)
+	return elvuiFile, nil
+}
+
+func extractZipFile(zipPath string, destDir string) error {
+	zip, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return errors.Join(errors.New("error when opening elvui zip file:"), err)
 	}
-
 	defer zip.Close()
 
 	for _, f := range zip.File {
-		rc, err := f.Open()
-		if err != nil {
-			return errors.Join(errors.New("error when opening file in zip file:"), err)
+		if err := extractFile(f, destDir); err != nil {
+			return err
 		}
+	}
 
-		defer rc.Close()
+	return nil
+}
 
-		if f.FileInfo().IsDir() {
-			err := os.Mkdir(filepath.Join(cf.WowAddonsDirectory, f.Name), 0755)
-			if err != nil {
-				return errors.Join(errors.New("error when creatin folder:"), err)
-			}
+func extractFile(f *zip.File, destDir string) error {
+	rc, err := f.Open()
+	if err != nil {
+		return errors.Join(errors.New("error when opening file in zip file:"), err)
+	}
+	defer rc.Close()
 
-			continue
-		}
+	destPath := filepath.Join(destDir, f.Name)
 
-		out, err := os.Create(filepath.Join(cf.WowAddonsDirectory, f.Name))
-		if err != nil {
-			return errors.Join(errors.New("error when creatin file:"), err)
-		}
-		defer out.Close()
+	if f.FileInfo().IsDir() {
+		return os.MkdirAll(destPath, 0755)
+	}
 
-		_, err = io.Copy(out, rc)
-		if err != nil {
-			return errors.Join(errors.New("error when copying elvui file to the destination folder:"), err)
-		}
+	out, err := os.Create(destPath)
+	if err != nil {
+		return errors.Join(errors.New("error when creating file:"), err)
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, rc)
+	if err != nil {
+		return errors.Join(errors.New("error when copying elvui file to the destination folder:"), err)
 	}
 
 	return nil
